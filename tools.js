@@ -111,8 +111,12 @@ function getCircleWithThreshold(
     let circleArray = [];
 
     // if no thresholds, set all pixels range
+
+    var userMinThreshold = document.getElementById("userMinThreshold");
+    var userMaxThreshold = document.getElementById("userMaxThreshold");
+
     if (!thresholds) {
-        thresholds = [image.minPixelValue, image.maxPixelValue];
+        thresholds = [userMinThreshold, userMaxThreshold];
     }
 
     function isInsideThresholds(v, t) {
