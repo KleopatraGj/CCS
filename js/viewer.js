@@ -5,16 +5,15 @@ cornerstoneTools.external.cornerstone = cornerstone;
 cornerstoneTools.external.cornerstoneMath = cornerstoneMath;
 segModule = cornerstoneTools.getModule('segmentation');
 
-var currentTool = '';
-
-
+let currentTool = '';
+let imageIds = [];
+let Seg_or_Ano = '';
 
 function onDragOver(event) {
 
     // stop browser processing right away
     event.stopPropagation();
     event.preventDefault();
-
 };
 
 function onDrop(event) {
@@ -23,8 +22,10 @@ function onDrop(event) {
     event.stopPropagation();
     event.preventDefault();
 
+
     console.log(event.dataTransfer.files);
     var file = event.dataTransfer.files[0];
+
 
     //checks if the file is a json file
     if (file.name.includes('.json') == true) {
@@ -47,61 +48,115 @@ function onDrop(event) {
         updateFromJSON(file);
         return;
     }
+    // If images are already loaded into the viewer, do not go through with tool initialization
+    else if (currentTool != '') {
+        // Adds all files to the array of ImageIds for the Stack Manager.
+        for (let i = 0; i < event.dataTransfer.files.length; i++) {
+            file = event.dataTransfer.files[i];
+            imageIds.push(cornerstoneWADOImageLoader.wadouri.fileManager.add(file));
+        }
 
-    else {
-        // array of DICOM ImageIds
-        imageIds = [];
-        
-        //adds all files to an array of ImageIds for the Stack Manager.
+        cornerstone.loadImage(imageIds[0]).then(function (image) {
+
+            // Get viewer canvas initialized by cornerstone.
+            cornerstone.getEnabledElement(viewer);
+
+
+            // Remove previous stack manager from tools, then add a new stack
+            // manager containing the newest batch of images.
+            cornerstoneTools.removeTool(viewer, "stack", cornerstoneTools.getToolState(viewer, stack));
+
+            var stack = { currentImageIdIndex: 0, imageIds: imageIds };
+            cornerstoneTools.addStackStateManager(viewer, ["stack"]);
+            cornerstoneTools.addToolState(viewer, "stack", stack);
+        });
+
+    }
+
+    else {   
+        // Add files to an array of ImageIds for the Stack Manager.
+
         for (let i = 0; i < event.dataTransfer.files.length; i++) {
             file = event.dataTransfer.files[i];
             imageIds.push(cornerstoneWADOImageLoader.wadouri.fileManager.add(file));
         }
         
-        console.log(imageIds);
-
         cornerstone.loadImage(imageIds[0]).then(function (image) {
 
-            console.log('Loaded', image);
-
-            cornerstoneTools.init();
+            console.log('Loaded', image);  
             
-            // viewer variable
-            var viewer = document.getElementById('viewer');
+            // Enable viewer for Cornerstone and display image.
 
+            var viewer = document.getElementById('viewer');
             cornerstone.enable(viewer);
             cornerstone.displayImage(viewer, image);
 
             //enables stack state for image viewer
             var stack = { currentImageIdIndex: 0, imageIds: imageIds };
             cornerstoneTools.addStackStateManager(viewer, ["stack"]);
-            cornerstoneTools.addToolState(viewer, "stack", stack);
 
-            //adds cornerstone tools
+
+            // Set up tool set for annotations of images. 
             cornerstoneTools.addTool(cornerstoneTools.StackScrollMouseWheelTool);
             cornerstoneTools.addTool(cornerstoneTools.ZoomTool);
             cornerstoneTools.addTool(cornerstoneTools.PanTool);
             cornerstoneTools.addTool(cornerstoneTools.LengthTool);
             cornerstoneTools.addTool(ThresholdsBrushTool);
+            cornerstoneTools.addTool(EraserBrushTool);
+            cornerstoneTools.addTool(cornerstoneTools.EraserTool);
+
+            // Change tool color to make length tool more visibile on DICOMs
+            cornerstoneTools.toolColors.setToolColor("blue");
+            cornerstoneTools.toolColors.setActiveColor("turquoise");
 
             // Activate tools as needed; default active tool is brush and stack scroll.
             cornerstoneTools.setToolPassive('ThresholdsBrush', { mouseButtonMask: 1 });
             cornerstoneTools.setToolActive('StackScrollMouseWheel', {});
-            cornerstoneTools.setToolPassive('Zoom', { mouseButtonMask: 1 });
-            cornerstoneTools.setToolPassive('Pan', { mouseButtonMask: 1 });
+            cornerstoneTools.setToolActive('Zoom', { mouseButtonMask: 2 });
+            cornerstoneTools.setToolActive('Pan', { mouseButtonMask: 4 });
             cornerstoneTools.setToolPassive('Length', { mouseButtonMask: 1 });
-            currentTool = 'ThresholdsBrush';
+            cornerstoneTools.setToolPassive('Eraser', { mouseButtonMask: 1 });
+            cornerstoneTools.setToolPassive('EraserBrush', { mouseButtonMask: 1 });
 
+
+            // Add ThresholdsBrush and Stack tool states to StackStateManager and set check variables.
+            cornerstoneTools.addToolState(viewer, "stack", stack);
+            cornerstoneTools.addToolState(viewer, "ThresholdsBrush", cornerstoneTools.store.state.tools[4]);
+            currentTool = 'ThresholdsBrush';
+            Seg_or_Ano = 'seg';
         });
 
     };
 };
+// Makes the Stats box move around
+function draggable(el) {
+    el.addEventListener('mousedown', function (e) {
+        var offsetX = e.clientX - parseInt(window.getComputedStyle(this).left);
+        var offsetY = e.clientY - parseInt(window.getComputedStyle(this).top);
+
+        function mouseMoveHandler(e) {
+            el.style.top = (e.clientY - offsetY) + 'px';
+            el.style.left = (e.clientX - offsetX) + 'px';
+        }
+
+        function reset() {
+            window.removeEventListener('mousemove', mouseMoveHandler);
+            window.removeEventListener('mouseup', reset);
+        }
+
+        window.addEventListener('mousemove', mouseMoveHandler);
+        window.addEventListener('mouseup', reset);
+    });
+}
 
 // initiallizes drag and drop on load 
 window.onload = function () {
 
     document.body.addEventListener('dragover', onDragOver);
     document.body.addEventListener('drop', onDrop);
+    cornerstoneTools.init();
+    draggable(document.getElementById('Statistics'));
+
 };
 // function brushbutton that will allow the onclick event when the user is pressing the brush button
 
@@ -126,71 +181,41 @@ window.onkeyup = function (event) {
         cornerstoneTools.setToolDisabled(currentTool);
         cornerstoneTools.setToolActive('ThresholdsBrush', { mouseButtonMask: 1 });
         currentTool = 'ThresholdsBrush';
+        Seg_or_Ano = 'seg';
     }
     // press - to decrease brush size
     else if (event.key == '-') {
         cornerstoneTools.store.state.tools[4].decreaseBrushSize();
     }
-    // press = to increase brush size
-    else if (event.key == '=') {
+    // press + to increase brush size
+    else if (event.key == '+') {
         cornerstoneTools.store.state.tools[4].increaseBrushSize();
-    }
-    // press z for zoom
-    else if (event.key == 'z') {
-        cornerstoneTools.setToolDisabled(currentTool);
-        cornerstoneTools.setToolActive('Zoom', { mouseButtonMask: 1 });
-        currentTool = 'Zoom';
     }
     // press l for length tool
     else if (event.key == 'l') {
         //cornerstoneTools.setToolDisabled(currentTool);
         cornerstoneTools.setToolActive('Length', { mouseButtonMask: 1 });
         currentTool = 'Length';
+        Seg_or_Ano = 'ano';
     }
-    // press p for pan
-    else if (event.key == 'p') {
-        cornerstoneTools.setToolDisabled(currentTool);
-        cornerstoneTools.setToolActive('Pan', { mouseButtonMask: 1 });
-        currentTool = 'Pan';
-    }
+    // press e for erase
+    else if (event.key == 'e') {
+        if (Seg_or_Ano == 'ano') {
+            cornerstoneTools.setToolPassive(currentTool);
+            cornerstoneTools.setToolActive('Eraser', { mouseButtonMask: 1 });
+            currentTool = 'Eraser';
+        }
+        else if (Seg_or_Ano == 'seg') {
+            cornerstoneTools.setToolDisabled(currentTool);
+            cornerstoneTools.setToolActive('EraserBrush', { mouseButtonMask: 1 });
+            currentTool = 'EraserBrush';
+        }
 
-    
-    //discrete calcifications 
-    else if (event.key == '2') {
-        var labelMap2D = segModule.getters.labelmap2D(viewer).labelmap2D;
-        var image = cornerstone.getImage(viewer);
-        var counts = discreteCount(labelMap2D, image);
-
-        var output1 = document.getElementById("output1");
-        var output2 = document.getElementById("output2");
-        var output3 = document.getElementById("output3");
-        var output4 = document.getElementById("output4");
-        var output5 = document.getElementById("output5");
-
-        if (counts.red != null) {
-            output1.innerHTML = "red: " + counts.red;
-        }
-        if (counts.blue != null) {
-            output2.innerHTML = "blue: " + counts.blue;
-        }
-        if (counts.green != null) {
-            output3.innerHTML = "green: " + counts.green;
-        }
-        if (counts.purple != null) {
-            output4.innerHTML = "purple: " + counts.purple;
-        }
-        if (counts.fuchsia != null) {
-            output5.innerHTML = "pink: " + counts.fuchsia;
-        }
-        console.log("red: " + counts.red);
-        console.log("blue: " + counts.blue);
-        console.log("green: " + counts.green);
-        console.log("purple: " + counts.purple);
-        console.log("pink: " + counts.fuchsia);
     }
     
-    //displays all statistics
-    else if (event.key == '3') {
+
+    // press s to display all statistics
+    else if (event.key == 's') {
 
         var labelMap2D = segModule.getters.labelmap2D(viewer).labelmap2D;
         var image = cornerstone.getImage(viewer);
@@ -263,60 +288,27 @@ window.onkeyup = function (event) {
         console.log("pink brush: " + areas.fuchsia + 'mm\u00B2');
     }
     
-    // press 4 for display statistics (densities)
-    else if (event.key == '4') {
 
-        var labelMap2D = segModule.getters.labelmap2D(viewer).labelmap2D;
-        var image = cornerstone.getImage(viewer);
-        var densities = getDensity(labelMap2D, image);
-
-        var output1 = document.getElementById("output1");
-        var output2 = document.getElementById("output2");
-        var output3 = document.getElementById("output3");
-        var output4 = document.getElementById("output4");
-        var output5 = document.getElementById("output5");
-
-        if (densities.red != null) {
-            output1.innerHTML = "red: " + densities.red;
-        }
-        if (densities.blue != null) {
-            output2.innerHTML = "blue: " + densities.blue;
-        }
-        if (densities.green != null) {
-            output3.innerHTML = "green: " + densities.green;
-        }
-        if (densities.purple != null) {
-            output4.innerHTML = "purple: " + densities.purple;
-        }
-        if (densities.fuchsia != null) {
-            output5.innerHTML = "pink: " + densities.fuchsia;
-        }
-        console.log("red: " + densities.red);
-        console.log("blue: " + densities.blue);
-        console.log("green: " + densities.green);
-        console.log("purple: " + densities.purple);
-        console.log("pink: " + densities.fuchsia);
-    }
     
-    //press u for undo
-    else if (event.key == 'u') {
+    //press ctrl+z for undo
+    else if (event.ctrlKey && event.key == 'z') {
         segModule.setters.undo(viewer);
     }
     
-    //press r for redo
-    else if (event.key == 'r') {
+    //press ctrl+w for redo
+    
+    else if (event.ctrlKey && event.key == 'y') {
         segModule.setters.redo(viewer);
     }
     
-    //press c for clear
-
-    else if (event.key == 'c') {
+    //press c for clear CLEAR FUNCTION NOT NEEDED NOW
+/*    else if (event.key == 'c') {
 
         clearBrushes(viewer);
     }
-    
-    //press q for json download
-    else if (event.key == 'q') {
+*/    
+    //press d for json download
+    else if (event.key == 'd') {
         var image = cornerstone.getImage(viewer);
         convertToJSON(image);
     }
